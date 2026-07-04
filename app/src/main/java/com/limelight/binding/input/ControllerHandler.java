@@ -2287,6 +2287,16 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
                 break;
             }
         }
+
+        // USB driver devices manage their own motion hardware
+        for (int i = 0; i < usbDeviceContexts.size(); i++) {
+            UsbDeviceContext deviceContext = usbDeviceContexts.valueAt(i);
+
+            if (deviceContext.controllerNumber == controllerNumber && deviceContext.device != null) {
+                deviceContext.device.setMotionEventState(motionType, reportRateHz);
+                break;
+            }
+        }
     }
 
     public void handleSetControllerLED(short controllerNumber, byte r, byte g, byte b) {
@@ -2842,6 +2852,33 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
         sendControllerInputPacket(context);
     }
+
+    @Override
+    public void reportControllerMotion(int controllerId, byte motionType, float x, float y, float z) {
+        GenericControllerContext context = usbDeviceContexts.get(controllerId);
+        if (context == null || !context.assignedControllerNumber) {
+            return;
+        }
+
+        conn.sendControllerMotionEvent((byte) context.controllerNumber, motionType, x, y, z);
+    }
+
+    @Override
+    public void reportControllerTouch(int controllerId, byte eventType, int pointerId, float x, float y, float pressure) {
+        GenericControllerContext context = usbDeviceContexts.get(controllerId);
+        if (context == null || !context.assignedControllerNumber) {
+            LimeLog.info("USB touch dropped: no assigned context for " + controllerId);
+            return;
+        }
+
+        int err = conn.sendControllerTouchEvent((byte) context.controllerNumber, eventType, pointerId, x, y, pressure);
+        if (err != 0 && !loggedTouchError) {
+            loggedTouchError = true;
+            LimeLog.warning("USB touch event failed: " + err);
+        }
+    }
+
+    private boolean loggedTouchError;
 
     @Override
     public void deviceRemoved(AbstractController controller) {

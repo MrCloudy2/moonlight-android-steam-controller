@@ -6,6 +6,12 @@ public interface UsbDriverListener {
                                float rightStickX, float rightStickY,
                                float leftTrigger, float rightTrigger);
 
+    void reportControllerMotion(int controllerId, byte motionType,
+                                float x, float y, float z);
+
+    void reportControllerTouch(int controllerId, byte eventType,
+                               int pointerId, float x, float y, float pressure);
+
     void deviceRemoved(AbstractController controller);
     void deviceAdded(AbstractController controller);
 }

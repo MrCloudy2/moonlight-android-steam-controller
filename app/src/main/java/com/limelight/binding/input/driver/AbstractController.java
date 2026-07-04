@@ -53,6 +53,21 @@ public abstract class AbstractController {
                 rightStickX, rightStickY, leftTrigger, rightTrigger);
     }
 
+    protected void reportMotion(byte motionType, float x, float y, float z) {
+        listener.reportControllerMotion(deviceId, motionType, x, y, z);
+    }
+
+    protected void reportTouch(byte eventType, int pointerId, float x, float y, float pressure) {
+        listener.reportControllerTouch(deviceId, eventType, pointerId, x, y, pressure);
+    }
+
+    /**
+     * Called when the host requests motion sensor reports (LI_MOTION_TYPE_*)
+     * at the given rate, or 0 Hz to stop. Drivers with motion hardware
+     * should override this.
+     */
+    public void setMotionEventState(byte motionType, short reportRateHz) {}
+
     public abstract boolean start();
     public abstract void stop();
 

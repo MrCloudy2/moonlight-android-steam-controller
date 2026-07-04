@@ -57,6 +57,10 @@ public class SteamControllerTriton extends AbstractController {
     private static final byte ID_SET_SETTINGS_VALUES = (byte) 0x87;
     private static final byte SETTING_LIZARD_MODE = 9;
     private static final short LIZARD_MODE_OFF = 0;
+    private static final byte SETTING_IMU_MODE = 48;
+    private static final short GYRO_MODE_OFF = 0x0000;
+    private static final short GYRO_MODE_SEND_RAW_ACCEL = 0x0008;
+    private static final short GYRO_MODE_SEND_RAW_GYRO = 0x0010;
 
     // Input report IDs (first byte of an interrupt transfer)
     private static final byte ID_TRITON_CONTROLLER_STATE = 0x42;
@@ -92,7 +96,9 @@ public class SteamControllerTriton extends AbstractController {
     private static final int TRITON_HBUTTON_L4           = 0x00020000;
     private static final int TRITON_LBUTTON_L5           = 0x00040000;
     private static final int TRITON_LBUTTON_L            = 0x00080000;
+    private static final int TRITON_RIGHT_TOUCHPAD_TOUCH = 0x00200000;
     private static final int TRITON_RIGHT_TOUCHPAD_CLICK = 0x00400000;
+    private static final int TRITON_LEFT_TOUCHPAD_TOUCH  = 0x02000000;
     private static final int TRITON_LEFT_TOUCHPAD_CLICK  = 0x04000000;
 
     private class Slot {
@@ -123,12 +129,26 @@ public class SteamControllerTriton extends AbstractController {
     private volatile short lowFreqMotor, highFreqMotor;
     private long lastRumbleSend;
 
+    private volatile boolean announced;
+
+    // Host-requested motion sensor rates (0 = off)
+    private volatile short accelReportRateHz, gyroReportRateHz;
+    private long lastAccelSend, lastGyroSend;
+
+    // Touchpad state for generating down/move/up events (pointer 0 = left pad, 1 = right pad)
+    private final boolean[] padTouching = new boolean[2];
+    private final long[] lastTouchMoveSend = new long[2];
+
+    // Throttle touchpad move events; state reports arrive far faster than needed
+    private static final long TOUCH_MOVE_INTERVAL_MS = 16;
+
     public SteamControllerTriton(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener) {
         super(deviceId, listener, device.getVendorId(), device.getProductId());
         this.device = device;
         this.connection = connection;
         this.type = MoonBridge.LI_CTYPE_UNKNOWN;
-        this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE;
+        this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE |
+                MoonBridge.LI_CCAP_ACCEL | MoonBridge.LI_CCAP_GYRO | MoonBridge.LI_CCAP_TOUCHPAD;
         this.buttonFlags =
                 ControllerPacket.A_FLAG | ControllerPacket.B_FLAG | ControllerPacket.X_FLAG | ControllerPacket.Y_FLAG |
                         ControllerPacket.UP_FLAG | ControllerPacket.DOWN_FLAG | ControllerPacket.LEFT_FLAG | ControllerPacket.RIGHT_FLAG |
@@ -155,14 +175,20 @@ public class SteamControllerTriton extends AbstractController {
      */
     private void disableLizardMode(Slot slot) {
         // 64-byte feature report with report ID 1:
-        // FeatureReportHeader { type, length } + ControllerSetting { num, value16 }
+        // FeatureReportHeader { type, length } + ControllerSetting { num, value16 } array
+        short imuMode = (accelReportRateHz != 0 || gyroReportRateHz != 0) ?
+                (short) (GYRO_MODE_SEND_RAW_ACCEL | GYRO_MODE_SEND_RAW_GYRO) : GYRO_MODE_OFF;
+
         byte[] buf = new byte[64];
         buf[0] = FEATURE_REPORT_ID;
         buf[1] = ID_SET_SETTINGS_VALUES;
-        buf[2] = 3; // sizeof(ControllerSetting)
+        buf[2] = 6; // 2 x sizeof(ControllerSetting)
         buf[3] = SETTING_LIZARD_MODE;
         buf[4] = (byte) (LIZARD_MODE_OFF & 0xFF);
         buf[5] = (byte) ((LIZARD_MODE_OFF >> 8) & 0xFF);
+        buf[6] = SETTING_IMU_MODE;
+        buf[7] = (byte) (imuMode & 0xFF);
+        buf[8] = (byte) ((imuMode >> 8) & 0xFF);
 
         int res;
         synchronized (controlLock) {
@@ -242,6 +268,7 @@ public class SteamControllerTriton extends AbstractController {
             LimeLog.info("Triton: controller state active on iface " + slot.ifaceNum);
             activeSlot = slot;
         }
+        announceIfNeeded();
 
         int buttons = buffer.getInt(2);
 
@@ -286,6 +313,93 @@ public class SteamControllerTriton extends AbstractController {
         rightStickY = ~buffer.getShort(16) / 32767.0f;
 
         reportInput();
+
+        // The 0x47 (timestamped) variant inserts a 16-bit trackpad timestamp
+        // before the pad fields, shifting them by 2 bytes. The IMU sample
+        // lands at the same offset in both layouts (u32 timestamp in 0x42/
+        // 0x45 vs u16 timestamp + 2 pad bytes in 0x47).
+        int padBase = (buffer.get(0) == ID_TRITON_CONTROLLER_STATE_TIMESTAMP) ? 20 : 18;
+        if (buffer.limit() >= padBase + 12) {
+            handleTouchpad(0, (buttons & TRITON_LEFT_TOUCHPAD_TOUCH) != 0,
+                    buffer.getShort(padBase), buffer.getShort(padBase + 2),
+                    buffer.getShort(padBase + 4) & 0xFFFF);
+            handleTouchpad(1, (buttons & TRITON_RIGHT_TOUCHPAD_TOUCH) != 0,
+                    buffer.getShort(padBase + 6), buffer.getShort(padBase + 8),
+                    buffer.getShort(padBase + 10) & 0xFFFF);
+        }
+
+        if (buffer.limit() >= 46) {
+            handleImu(buffer);
+        }
+    }
+
+    /**
+     * Maps the two physical trackpads onto the left and right halves of the
+     * virtual controller's touchpad, like the DualShock 4's split pad.
+     */
+    private void handleTouchpad(int pointerId, boolean touching, short rawX, short rawY, int rawPressure) {
+        boolean wasTouching = padTouching[pointerId];
+        if (!touching && !wasTouching) {
+            return;
+        }
+
+        long now = SystemClock.uptimeMillis();
+        byte eventType;
+        if (touching && !wasTouching) {
+            eventType = MoonBridge.LI_TOUCH_EVENT_DOWN;
+        }
+        else if (!touching) {
+            eventType = MoonBridge.LI_TOUCH_EVENT_UP;
+        }
+        else {
+            if (now - lastTouchMoveSend[pointerId] < TOUCH_MOVE_INTERVAL_MS) {
+                return;
+            }
+            eventType = MoonBridge.LI_TOUCH_EVENT_MOVE;
+        }
+
+        // Pad coordinates are centered signed values; normalize to 0..1
+        float x = rawX / 65536.0f + 0.5f;
+        float y = -rawY / 65536.0f + 0.5f;
+
+        // Left pad on the left half, right pad on the right half
+        x = (pointerId == 0) ? (x * 0.5f) : (0.5f + x * 0.5f);
+
+        float pressure = Math.min(1.0f, rawPressure / 32768.0f);
+
+        if (eventType != MoonBridge.LI_TOUCH_EVENT_MOVE) {
+            LimeLog.info("Triton: touch pad=" + pointerId + " type=" + eventType +
+                    " x=" + x + " y=" + y + " p=" + pressure);
+        }
+        reportTouch(eventType, pointerId, x, y, pressure);
+
+        padTouching[pointerId] = touching;
+        lastTouchMoveSend[pointerId] = now;
+    }
+
+    private void handleImu(ByteBuffer buffer) {
+        long now = SystemClock.uptimeMillis();
+
+        // Remap controller axes to SDL's convention: x, z, -y
+        if (accelReportRateHz != 0 && now - lastAccelSend >= 1000 / accelReportRateHz) {
+            // Raw accelerometer is +/-2g; convert to m/s^2
+            final float scale = 2.0f * 9.80665f / 32768.0f;
+            reportMotion(MoonBridge.LI_MOTION_TYPE_ACCEL,
+                    buffer.getShort(34) * scale,
+                    buffer.getShort(38) * scale,
+                    -buffer.getShort(36) * scale);
+            lastAccelSend = now;
+        }
+
+        if (gyroReportRateHz != 0 && now - lastGyroSend >= 1000 / gyroReportRateHz) {
+            // Raw gyro is +/-2000 deg/s; the protocol wants deg/s
+            final float scale = 2000.0f / 32768.0f;
+            reportMotion(MoonBridge.LI_MOTION_TYPE_GYRO,
+                    buffer.getShort(40) * scale,
+                    buffer.getShort(44) * scale,
+                    -buffer.getShort(42) * scale);
+            lastGyroSend = now;
+        }
     }
 
     private void neutralizeState() {
@@ -322,6 +436,7 @@ public class SteamControllerTriton extends AbstractController {
                     case WIRELESS_STATE_CONNECT:
                         LimeLog.info("Triton: wireless connect on iface " + slot.ifaceNum);
                         disableLizardMode(slot);
+                        announceIfNeeded();
                         break;
 
                     case WIRELESS_STATE_DISCONNECT:
@@ -444,21 +559,36 @@ public class SteamControllerTriton extends AbstractController {
             slot.thread.start();
         }
 
-        // Delay for a moment before reporting the new gamepad, to allow any
-        // lizard mode InputDevices to settle first.
-        announceThread = new Thread() {
-            public void run() {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    return;
+        // For the wired controller, announce the gamepad after a short delay
+        // to allow any lizard mode InputDevices to settle first. For dongles,
+        // wait until a controller actually links so we don't report a
+        // phantom gamepad for an empty puck.
+        if (!isDongle()) {
+            announceThread = new Thread() {
+                public void run() {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    announceIfNeeded();
                 }
-                notifyDeviceAdded();
-            }
-        };
-        announceThread.start();
+            };
+            announceThread.start();
+        }
 
         return true;
+    }
+
+    private boolean isDongle() {
+        return device.getProductId() != PID_TRITON_WIRED;
+    }
+
+    private synchronized void announceIfNeeded() {
+        if (!announced && !stopped) {
+            announced = true;
+            notifyDeviceAdded();
+        }
     }
 
     @Override
@@ -491,6 +621,26 @@ public class SteamControllerTriton extends AbstractController {
 
         // Report the device removed
         notifyDeviceRemoved();
+    }
+
+    @Override
+    public void setMotionEventState(byte motionType, short reportRateHz) {
+        switch (motionType) {
+            case MoonBridge.LI_MOTION_TYPE_ACCEL:
+                accelReportRateHz = reportRateHz;
+                break;
+            case MoonBridge.LI_MOTION_TYPE_GYRO:
+                gyroReportRateHz = reportRateHz;
+                break;
+            default:
+                return;
+        }
+
+        // Push the new IMU mode to the controller immediately
+        Slot slot = activeSlot;
+        if (slot != null) {
+            disableLizardMode(slot);
+        }
     }
 
     @Override
