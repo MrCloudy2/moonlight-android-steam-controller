@@ -194,6 +194,12 @@ public class UsbDriverService extends Service implements UsbDriverListener {
             else if (Xbox360WirelessDongle.canClaimDevice(device)) {
                 controller = new Xbox360WirelessDongle(device, connection, nextDeviceId++, this);
             }
+            else if (SteamController.canClaimDevice(device)) {
+                controller = new SteamController(device, connection, nextDeviceId++, this);
+            }
+            else if (SteamControllerTriton.canClaimDevice(device)) {
+                controller = new SteamControllerTriton(device, connection, nextDeviceId++, this);
+            }
             else {
                 // Unreachable
                 return;
@@ -278,7 +284,12 @@ public class UsbDriverService extends Service implements UsbDriverListener {
         return ((!kernelSupportsXboxOne() || !isRecognizedInputDevice(device) || claimAllAvailable) && XboxOneController.canClaimDevice(device)) ||
                 ((!isRecognizedInputDevice(device) || claimAllAvailable) && Xbox360Controller.canClaimDevice(device)) ||
                 // We must not call isRecognizedInputDevice() because wireless controllers don't share the same product ID as the dongle
-                ((!kernelSupportsXbox360W() || claimAllAvailable) && Xbox360WirelessDongle.canClaimDevice(device));
+                ((!kernelSupportsXbox360W() || claimAllAvailable) && Xbox360WirelessDongle.canClaimDevice(device)) ||
+                // We must not call isRecognizedInputDevice() because the Steam Controller's lizard mode
+                // keyboard/mouse interfaces create InputDevices with the same VID/PID, but no kernel
+                // driver on Android can operate it as a gamepad.
+                SteamController.canClaimDevice(device) ||
+                SteamControllerTriton.canClaimDevice(device);
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
