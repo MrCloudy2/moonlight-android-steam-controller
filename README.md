@@ -1,3 +1,30 @@
+# Moonlight Android — Steam Controller fork
+
+> **This is a community fork adding native USB support for Valve Steam Controllers**
+> (both the original 2015 controller and the 2nd generation 2026 "Triton" controller,
+> including the Controller Puck wireless dongle). Upstream Moonlight sees a Steam
+> Controller only as a mouse, because the controller boots in "lizard mode"
+> (keyboard/mouse emulation) and Android has no kernel driver for its gamepad mode.
+> This fork claims the controller over USB, disables lizard mode, and parses the
+> native protocol — ported from the zlib-licensed SDL implementation.
+>
+> **Status: experimental / looking for testers.**
+>
+> | Feature | Status |
+> |---|---|
+> | Buttons / sticks / triggers / D-pad (2nd gen, via Puck) | ✅ tested working |
+> | Gyro + accelerometer (as PlayStation-type controller) | ✅ tested working |
+> | Rumble (grip haptics) | ⚠️ implemented, untested |
+> | "Emulate Steam Controller as" setting (Auto/Xbox/PS/Nintendo) | ✅ working |
+> | Trackpads → touchpad forwarding | 🚧 implemented, not working yet |
+> | 4 back buttons | ❌ impossible via standard pad emulation (needs HID passthrough on host) |
+> | Original (2015) Steam Controller | ⚠️ implemented from SDL reference, untested — testers needed! |
+> | Bluetooth (BLE) connection | ❌ not supported — use USB cable or the wireless dongle/puck |
+>
+> Tested on: 2nd gen Steam Controller + Controller Puck + Philips Google TV (Android 14).
+> Please report results on other devices via GitHub issues. Debug logs:
+> `adb logcat -v time com.limelight.LimeLog:V '*:S'`
+
 # Moonlight Android
 
 [![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/232a8tadrrn8jv0k/branch/master?svg=true)](https://ci.appveyor.com/project/cgutman/moonlight-android/branch/master)
