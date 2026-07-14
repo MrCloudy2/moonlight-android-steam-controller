@@ -142,13 +142,36 @@ public class SteamControllerTriton extends AbstractController {
     // Throttle touchpad move events; state reports arrive far faster than needed
     private static final long TOUCH_MOVE_INTERVAL_MS = 16;
 
-    public SteamControllerTriton(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener) {
+    public SteamControllerTriton(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener,
+                                 String emulationMode) {
         super(deviceId, listener, device.getVendorId(), device.getProductId());
         this.device = device;
         this.connection = connection;
-        this.type = MoonBridge.LI_CTYPE_UNKNOWN;
-        this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE |
-                MoonBridge.LI_CCAP_ACCEL | MoonBridge.LI_CCAP_GYRO | MoonBridge.LI_CCAP_TOUCHPAD;
+
+        // The emulation mode selects what kind of controller the host sees.
+        // Sunshine picks its virtual pad from the type and capability bits.
+        switch (emulationMode != null ? emulationMode : "auto") {
+            case "xbox":
+                this.type = MoonBridge.LI_CTYPE_XBOX;
+                this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE;
+                break;
+            case "ps":
+                this.type = MoonBridge.LI_CTYPE_PS;
+                this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE |
+                        MoonBridge.LI_CCAP_ACCEL | MoonBridge.LI_CCAP_GYRO | MoonBridge.LI_CCAP_TOUCHPAD;
+                break;
+            case "nintendo":
+                this.type = MoonBridge.LI_CTYPE_NINTENDO;
+                this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE |
+                        MoonBridge.LI_CCAP_ACCEL | MoonBridge.LI_CCAP_GYRO;
+                break;
+            case "auto":
+            default:
+                this.type = MoonBridge.LI_CTYPE_UNKNOWN;
+                this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE |
+                        MoonBridge.LI_CCAP_ACCEL | MoonBridge.LI_CCAP_GYRO | MoonBridge.LI_CCAP_TOUCHPAD;
+                break;
+        }
         this.buttonFlags =
                 ControllerPacket.A_FLAG | ControllerPacket.B_FLAG | ControllerPacket.X_FLAG | ControllerPacket.Y_FLAG |
                         ControllerPacket.UP_FLAG | ControllerPacket.DOWN_FLAG | ControllerPacket.LEFT_FLAG | ControllerPacket.RIGHT_FLAG |
@@ -319,7 +342,7 @@ public class SteamControllerTriton extends AbstractController {
         // lands at the same offset in both layouts (u32 timestamp in 0x42/
         // 0x45 vs u16 timestamp + 2 pad bytes in 0x47).
         int padBase = (buffer.get(0) == ID_TRITON_CONTROLLER_STATE_TIMESTAMP) ? 20 : 18;
-        if (buffer.limit() >= padBase + 12) {
+        if ((capabilities & MoonBridge.LI_CCAP_TOUCHPAD) != 0 && buffer.limit() >= padBase + 12) {
             handleTouchpad(0, (buttons & TRITON_LEFT_TOUCHPAD_TOUCH) != 0,
                     buffer.getShort(padBase), buffer.getShort(padBase + 2),
                     buffer.getShort(padBase + 4) & 0xFFFF);

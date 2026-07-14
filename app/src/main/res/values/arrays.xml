@@ -131,4 +131,16 @@
         <item>right</item>
         <item>left</item>
     </string-array>
+    <string-array name="steam_controller_emulation_names">
+        <item>@string/steamemu_auto</item>
+        <item>@string/steamemu_xbox</item>
+        <item>@string/steamemu_ps</item>
+        <item>@string/steamemu_nintendo</item>
+    </string-array>
+    <string-array name="steam_controller_emulation_values" translatable="false">
+        <item>auto</item>
+        <item>xbox</item>
+        <item>ps</item>
+        <item>nintendo</item>
+    </string-array>
 </resources>

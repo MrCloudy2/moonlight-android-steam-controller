@@ -293,6 +293,29 @@ public class StreamSettings extends Activity {
                 category.removePreference(findPreference("checkbox_absolute_mouse_mode"));
             }
 
+            // Gray out the Steam Controller emulation option unless a Steam
+            // Controller (or its wireless dongle) is currently connected
+            {
+                boolean steamControllerPresent = false;
+                android.hardware.usb.UsbManager usbManager =
+                        (android.hardware.usb.UsbManager) getActivity().getSystemService(Context.USB_SERVICE);
+                if (usbManager != null) {
+                    for (android.hardware.usb.UsbDevice dev : usbManager.getDeviceList().values()) {
+                        if (com.limelight.binding.input.driver.SteamController.canClaimDevice(dev) ||
+                                com.limelight.binding.input.driver.SteamControllerTriton.canClaimDevice(dev)) {
+                            steamControllerPresent = true;
+                            break;
+                        }
+                    }
+                }
+
+                Preference steamEmuPref = findPreference(PreferenceConfiguration.STEAM_CONTROLLER_EMULATION_PREF_STRING);
+                if (!steamControllerPresent) {
+                    steamEmuPref.setEnabled(false);
+                    steamEmuPref.setSummary(R.string.summary_steam_controller_emulation_none_detected);
+                }
+            }
+
             // Hide gamepad motion sensor option when running on OSes before Android 12.
             // Support for motion, LED, battery, and other extensions were introduced in S.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {

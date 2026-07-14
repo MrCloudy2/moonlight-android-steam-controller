@@ -80,6 +80,14 @@
             android:title="@string/title_checkbox_usb_bind_all"
             android:summary="@string/summary_checkbox_usb_bind_all"
             android:defaultValue="false" />
+        <ListPreference
+            android:key="list_steam_controller_emulation"
+            android:dependency="checkbox_usb_driver"
+            android:title="@string/title_steam_controller_emulation"
+            android:summary="@string/summary_steam_controller_emulation"
+            android:entries="@array/steam_controller_emulation_names"
+            android:entryValues="@array/steam_controller_emulation_values"
+            android:defaultValue="auto" />
         <CheckBoxPreference
             android:key="checkbox_mouse_emulation"
             android:title="@string/title_checkbox_mouse_emulation"

@@ -211,10 +211,12 @@ public class UsbDriverService extends Service implements UsbDriverListener {
                 controller = new Xbox360WirelessDongle(device, connection, nextDeviceId++, this);
             }
             else if (SteamController.canClaimDevice(device)) {
-                controller = new SteamController(device, connection, nextDeviceId++, this);
+                controller = new SteamController(device, connection, nextDeviceId++, this,
+                        prefConfig.steamControllerEmulation);
             }
             else if (SteamControllerTriton.canClaimDevice(device)) {
-                controller = new SteamControllerTriton(device, connection, nextDeviceId++, this);
+                controller = new SteamControllerTriton(device, connection, nextDeviceId++, this,
+                        prefConfig.steamControllerEmulation);
             }
             else {
                 // Unreachable

@@ -99,13 +99,29 @@ public class SteamController extends AbstractController {
 
     private int lastPacketNum;
 
-    public SteamController(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener) {
+    public SteamController(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener,
+                           String emulationMode) {
         super(deviceId, listener, device.getVendorId(), device.getProductId());
         this.device = device;
         this.connection = connection;
         this.controllerIfaceNum = (device.getProductId() == PID_DONGLE) ?
                 DONGLE_CONTROLLER_INTERFACE : WIRED_CONTROLLER_INTERFACE;
-        this.type = MoonBridge.LI_CTYPE_UNKNOWN;
+
+        // The emulation mode selects what kind of controller the host sees
+        switch (emulationMode != null ? emulationMode : "auto") {
+            case "xbox":
+                this.type = MoonBridge.LI_CTYPE_XBOX;
+                break;
+            case "ps":
+                this.type = MoonBridge.LI_CTYPE_PS;
+                break;
+            case "nintendo":
+                this.type = MoonBridge.LI_CTYPE_NINTENDO;
+                break;
+            default:
+                this.type = MoonBridge.LI_CTYPE_UNKNOWN;
+                break;
+        }
         this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS;
         this.buttonFlags =
                 ControllerPacket.A_FLAG | ControllerPacket.B_FLAG | ControllerPacket.X_FLAG | ControllerPacket.Y_FLAG |
